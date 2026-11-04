@@ -23,7 +23,7 @@ export default function App() {
           <div key={`c${x},${y}`} onClick={()=>play(x,y)} style={{position:'absolute',left:OFFSET+x*CELL-CELL/2,top:OFFSET+y*CELL-CELL/2,width:CELL,height:CELL,cursor:'pointer'}}/>
         )))}
       </div>
-      <div style={{marginTop:12}}><button onClick={pass}>PASS</button><button onClick={reset} style={{marginLeft:8}}>重置</button></div>
+      <div style={{marginTop:12}}><button onClick={pass}>PASS</button><button onClick={async()=>{const r=await fetch('http://localhost:3001/api/go9/ai-move',{method:'POST'});const d=await r.json();if(d.state)setState(d.state)}} style={{marginLeft:8}}>AI走一步</button><button onClick={reset} style={{marginLeft:8}}>重置</button></div>
     </div>
   );
 }
