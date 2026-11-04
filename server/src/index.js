@@ -1,45 +1,110 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { PrismaClient } = require('../generated/prisma/client');
-const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
-const Go9Game = require('./games/go9');
-const HeuristicGoAgent = require('./agents/heuristicGoAgent');
+'use strict';
 
-const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: 'file:./prisma/dev.db' }) });
-const hAgent = new HeuristicGoAgent();
-const app = express(); app.use(cors()); app.use(express.json());
+/**
+ * 服务端启动入口。
+ *
+ * - 加载 server/.env（与启动 cwd 无关）
+ * - 创建数据库连接并真实探测；不可用时降级为纯内存模式，服务照常启动
+ * - 创建 AI provider registry（heuristic/http/katago），优雅退出时关闭资源
+ */
 
-let game = new Go9Game(); let currentGameId = null;
+const path = require('node:path');
 
-async function saveGame() {
-  if (!currentGameId) { const r = await prisma.game.create({ data: { gameType:'go9', boardState:JSON.stringify(game.board), moveHistory:JSON.stringify([]) } }); currentGameId = r.id; }
-  await prisma.game.update({ where:{id:currentGameId}, data:{ boardState:JSON.stringify(game.board), moveHistory:JSON.stringify(game.moves), status:game.winner?'finished':'playing', winner:game.winner||null } });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
+
+const { createDatabase, probeDatabase, disconnectDatabase } = require('./db');
+const { createApp } = require('./app');
+const pkg = require('../package.json');
+
+function parsePort(value) {
+  const port = Number.parseInt(value, 10);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : 3001;
 }
 
-app.get('/api/go9/state', (req,res) => res.json(game.getState()));
-app.post('/api/go9/move', async (req,res) => { const r = game.place(req.body.x, req.body.y); if(!r.ok) return res.status(400).json(r); await saveGame(); res.json(game.getState()); });
-app.post('/api/go9/pass', async (req,res) => { const r = game.pass(); await saveGame(); res.json({...r, state:game.getState()}); });
-app.post('/api/go9/reset', (req,res) => { game = new Go9Game(); currentGameId = null; res.json(game.getState()); });
-app.post('/api/go9/ai-move', async (req,res) => { const m = await hAgent.getMove(game.board, game.moves, game.currentPlayer); if(m){ game.place(m.x,m.y); await saveGame(); } res.json({move:m, state:game.getState()}); });
+/**
+ * 创建真实 provider registry；模块缺失或初始化失败时返回 undefined，
+ * 由 createApp 退回 heuristic-only registry（不阻塞服务启动）。
+ */
+function createRegistry() {
+  try {
+    const { createAgentRegistry } = require('./agents/registry');
+    const registry = createAgentRegistry({ env: process.env });
+    const agents = typeof registry.list === 'function' ? registry.list() : [];
+    const available = Array.isArray(agents) ? agents.filter((item) => item && item.available) : [];
+    console.log(
+      `[agents] 默认 provider: ${registry.defaultProvider}；可用: ${
+        available.map((item) => item.id).join(', ') || '无'
+      }`,
+    );
+    return registry;
+  } catch (error) {
+    console.warn(`[agents] provider registry 不可用，使用内置 heuristic 兜底：${error && error.message ? error.message : error}`);
+    return undefined;
+  }
+}
 
-app.post('/api/games/:id/analyze', async (req,res) => {
-  const rec = await prisma.game.findUnique({where:{id:req.params.id}});
-  if(!rec) return res.status(404).json({error:'not_found'});
-  const moves = JSON.parse(rec.moveHistory); const temp = new Go9Game(); const mistakes = [];
-  for(let i=0;i<moves.length;i++){ const m=moves[i]; if(m.pass||m.x===null) continue; const s = await hAgent.getMove(temp.board,temp.moves,m.player); if(s&&(s.x!==m.x||s.y!==m.y)) mistakes.push({moveIndex:i,played:{x:m.x,y:m.y},suggested:s}); temp.place(m.x,m.y); }
-  const analysis = { mistakes: mistakes.slice(-5), summary: mistakes.length>0?`共 ${mistakes.length} 手与启发式推荐不同。`:'本局基本一致。'};
-  await prisma.game.update({where:{id:req.params.id},data:{analysisJson:JSON.stringify(analysis)}});
-  res.json(analysis);
-});
+async function main() {
+  const db = createDatabase();
 
-app.get('/api/games/:id/export', async (req,res) => {
-  const rec = await prisma.game.findUnique({where:{id:req.params.id}});
-  if(!rec) return res.status(404).send('not found');
-  const moves=JSON.parse(rec.moveHistory); const L='abcdefghi'; let sgf='';
-  for(const m of moves){ sgf += (m.pass||m.x===null) ? `;${m.player==='black'?'B':'W'}[]` : `;${m.player==='black'?'B':'W'}[${L[m.x]}${L[m.y]}]`; }
-  res.setHeader('Content-Type','application/x-go-sgf'); res.setHeader('Content-Disposition',`attachment; filename="${rec.id}.sgf"`);
-  res.send(`(;FF[4]GM[1]SZ[9]PB[黑方]PW[白方]RE[${rec.winner||'?'}]${sgf})`);
-});
+  if (!db.enabled) {
+    console.log('[db] DISABLE_DB=1，服务以纯内存模式启动（不连接数据库）');
+  } else {
+    const available = await probeDatabase(db);
+    if (available) {
+      console.log(`[db] SQLite 已连接: ${db.filePath || db.url}`);
+    } else {
+      console.warn(`[db] 数据库不可用，持久化降级为内存模式：${db.error ? db.error.message : '未知原因'}`);
+    }
+  }
 
-app.listen(3001, () => console.log('✅ 后端启动: http://localhost:3001'));
+  const registry = createRegistry();
+  const app = createApp({ db, registry, version: pkg.version });
+  const port = parsePort(process.env.PORT);
+
+  const server = app.listen(port, () => {
+    const address = server.address();
+    const actualPort = address && typeof address === 'object' ? address.port : port;
+    console.log(`✅ 后端启动: http://localhost:${actualPort}`);
+  });
+
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n[server] 收到 ${signal}，正在关闭...`);
+    const forceTimer = setTimeout(() => {
+      console.warn('[server] 优雅关闭超时，强制退出');
+      process.exit(0);
+    }, 5000);
+    forceTimer.unref();
+
+    server.close(async () => {
+      try {
+        if (registry && typeof registry.shutdown === 'function') await registry.shutdown();
+      } catch (error) {
+        console.warn(`[agents] 关闭 provider 资源失败：${error && error.message ? error.message : error}`);
+      } finally {
+        try {
+          await disconnectDatabase(db);
+        } finally {
+          clearTimeout(forceTimer);
+          process.exit(0);
+        }
+      }
+    });
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  return server;
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[server] 启动失败:', error && error.stack ? error.stack : error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main, parsePort, createRegistry };
