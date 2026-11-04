@@ -23,4 +23,23 @@ app.post('/api/go9/pass', async (req,res) => { const r = game.pass(); await save
 app.post('/api/go9/reset', (req,res) => { game = new Go9Game(); currentGameId = null; res.json(game.getState()); });
 app.post('/api/go9/ai-move', async (req,res) => { const m = await hAgent.getMove(game.board, game.moves, game.currentPlayer); if(m){ game.place(m.x,m.y); await saveGame(); } res.json({move:m, state:game.getState()}); });
 
+app.post('/api/games/:id/analyze', async (req,res) => {
+  const rec = await prisma.game.findUnique({where:{id:req.params.id}});
+  if(!rec) return res.status(404).json({error:'not_found'});
+  const moves = JSON.parse(rec.moveHistory); const temp = new Go9Game(); const mistakes = [];
+  for(let i=0;i<moves.length;i++){ const m=moves[i]; if(m.pass||m.x===null) continue; const s = await hAgent.getMove(temp.board,temp.moves,m.player); if(s&&(s.x!==m.x||s.y!==m.y)) mistakes.push({moveIndex:i,played:{x:m.x,y:m.y},suggested:s}); temp.place(m.x,m.y); }
+  const analysis = { mistakes: mistakes.slice(-5), summary: mistakes.length>0?`共 ${mistakes.length} 手与启发式推荐不同。`:'本局基本一致。'};
+  await prisma.game.update({where:{id:req.params.id},data:{analysisJson:JSON.stringify(analysis)}});
+  res.json(analysis);
+});
+
+app.get('/api/games/:id/export', async (req,res) => {
+  const rec = await prisma.game.findUnique({where:{id:req.params.id}});
+  if(!rec) return res.status(404).send('not found');
+  const moves=JSON.parse(rec.moveHistory); const L='abcdefghi'; let sgf='';
+  for(const m of moves){ sgf += (m.pass||m.x===null) ? `;${m.player==='black'?'B':'W'}[]` : `;${m.player==='black'?'B':'W'}[${L[m.x]}${L[m.y]}]`; }
+  res.setHeader('Content-Type','application/x-go-sgf'); res.setHeader('Content-Disposition',`attachment; filename="${rec.id}.sgf"`);
+  res.send(`(;FF[4]GM[1]SZ[9]PB[黑方]PW[白方]RE[${rec.winner||'?'}]${sgf})`);
+});
+
 app.listen(3001, () => console.log('✅ 后端启动: http://localhost:3001'));
