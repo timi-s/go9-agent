@@ -1,6 +1,54 @@
+# 依赖
 node_modules/
+
+# 环境变量（示例文件除外）
 .env
+.env.*
+!.env.example
+
+# 构建产物
 dist/
+dist-ssr/
+build/
+
+# SQLite 数据库（本地数据，不入库）
 *.db
+*.db-journal
 *.sqlite
+*.sqlite3
+server/prisma/dev.db
+
+# Prisma 生成的客户端（由 npm run db:generate 生成）
+server/generated/
+
+# AI 助手生成的技能文档目录（避免污染仓库）
+.agents/
+.windsurf/
+.claude/skills/
+
+# 单文件提交版 bot 的构建产物
+server/ai/dist/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 日志与系统文件
+*.log
+npm-debug.log*
 .DS_Store
+Thumbs.db
+
+# 本地验收/截图/临时解包文件（不属于产品）
+_shot*.png
+ArenaStudent*/
+gtp_logs/
+coverage/
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
