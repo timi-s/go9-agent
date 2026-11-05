@@ -89,10 +89,17 @@ function severityOfLoss(loss) {
   return null;
 }
 
-function gradeOf(accuracy, averageLoss) {
-  if (accuracy >= 0.9 && averageLoss < 10) return 'A';
-  if (accuracy >= 0.8 && averageLoss < 20) return 'B';
-  if (accuracy >= 0.65 && averageLoss < 35) return 'C';
+/**
+ * 综合评级：以“平均损失 + 严重失误数”为主，避免出现
+ * “只因为没下在 AI 第一选点、但每手只差 1 分”也被评为 D 的误导。
+ * accuracy（首选一致率）保留为诊断指标，不作为评级门槛。
+ */
+function gradeOf(accuracy, averageLoss, counts = {}) {
+  const blunders = Number.isFinite(counts.blunders) ? counts.blunders : 0;
+  const mistakes = Number.isFinite(counts.mistakes) ? counts.mistakes : 0;
+  if (averageLoss < 6 && blunders === 0 && mistakes <= 1) return 'A';
+  if (averageLoss < 15 && blunders <= 1) return 'B';
+  if (averageLoss < 30 && blunders <= 3) return 'C';
   return 'D';
 }
 
@@ -365,12 +372,16 @@ function analyzeGame(options = {}) {
   const averageLossRaw = comparedMoves > 0 ? lossSum / comparedMoves : 0;
   const accuracy = round2(accuracyRaw);
   const averageLoss = round2(averageLossRaw);
-  const grade = gradeOf(accuracyRaw, averageLossRaw);
+  const blunderCount = allMistakes.filter((item) => item.severity === 'blunder').length;
+  const grade = gradeOf(accuracyRaw, averageLossRaw, {
+    blunders: blunderCount,
+    mistakes: allMistakes.length,
+  });
 
   // 最近优先：取最后 10 条并倒序
   const mistakes = allMistakes.slice(-MAX_MISTAKES).reverse();
 
-  // 中文总结：手数、一致率、等级、Top2 弱点（样本少时注明仅供参考）
+  // 中文总结：手数、首选一致率、平均损失、等级、Top2 弱点（样本少时注明仅供参考）
   const accuracyPercent = Math.round(accuracyRaw * 100);
   const topWeaknesses = weaknesses.slice(0, 2).map((item) => `${item.label}（${item.count} 次）`);
   const sampleNote = comparedMoves > 0 && comparedMoves < 5 ? '（样本较少，仅供参考）' : '';
@@ -378,10 +389,10 @@ function analyzeGame(options = {}) {
   if (totalMoves === 0) {
     summary = '共 0 手，一致率 100%，评级 A，暂无可分析内容；整体稳定。';
   } else if (topWeaknesses.length === 0) {
-    const mismatchNote = mismatches > 0 ? '（差异手未达失误阈值）' : '';
-    summary = `共 ${totalMoves} 手（可分析 ${comparedMoves} 手），一致率 ${accuracyPercent}%，评级 ${grade}${sampleNote}，整体稳定${mismatchNote}。`;
+    const mismatchNote = mismatches > 0 ? '（多数手与 AI 首选不同，但损失未达失误阈值）' : '';
+    summary = `共 ${totalMoves} 手（可分析 ${comparedMoves} 手），AI 首选一致率 ${accuracyPercent}%，平均损失 ${averageLoss}，评级 ${grade}${sampleNote}，整体稳定${mismatchNote}。`;
   } else {
-    summary = `共 ${totalMoves} 手（可分析 ${comparedMoves} 手），一致率 ${accuracyPercent}%，评级 ${grade}${sampleNote}，主要弱点：${topWeaknesses.join('、')}。`;
+    summary = `共 ${totalMoves} 手（可分析 ${comparedMoves} 手），AI 首选一致率 ${accuracyPercent}%，平均损失 ${averageLoss}，评级 ${grade}${sampleNote}，主要弱点：${topWeaknesses.join('、')}。`;
   }
 
   return {

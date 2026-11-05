@@ -19,7 +19,7 @@ const assert = require('node:assert/strict');
 
 const Go9Game = require('../src/games/go9');
 const HeuristicGoAgent = require('../src/agents/heuristicGoAgent');
-const { analyzeGame, detectReason } = require('../src/analysis/analyze');
+const { analyzeGame, detectReason, gradeOf } = require('../src/analysis/analyze');
 
 // ---------------------------------------------------------------------------
 // 辅助
@@ -200,7 +200,7 @@ describe('失误分级阈值', () => {
     assert.equal(huge.mistakes[0].loss, 100);
   });
 
-  test('mismatches/accuracy/grade 按坐标一致率计算', () => {
+  test('mismatches/accuracy 按坐标一致率精确统计；grade 以平均损失为主', () => {
     // 实手与首选一致 => accuracy 1 / grade A
     const perfect = analyzeGame({
       moves: [move(8, 8, 'black')],
@@ -211,7 +211,18 @@ describe('失误分级阈值', () => {
     assert.equal(perfect.accuracy, 1);
     assert.equal(perfect.grade, 'A');
 
-    // 与首选不同 => accuracy 0 / grade D
+    // 与首选不同 => accuracy 0；若损失很小，评级不应被一棍子打成 D
+    const lowLoss = analyzeGame({
+      moves: [move(0, 0, 'black')],
+      komi: 7.5,
+      scorer: makeScorer((point) => (point.x === 8 && point.y === 8 ? 100 : 99)),
+    });
+    assert.equal(lowLoss.mismatches, 1);
+    assert.equal(lowLoss.accuracy, 0);
+    assert.equal(lowLoss.averageLoss, 1);
+    assert.equal(lowLoss.grade, 'A');
+
+    // 与首选不同且损失巨大 => 仍为 D
     const bad = analyzeGame({
       moves: [move(0, 0, 'black')],
       komi: 7.5,
@@ -220,6 +231,14 @@ describe('失误分级阈值', () => {
     assert.equal(bad.mismatches, 1);
     assert.equal(bad.accuracy, 0);
     assert.equal(bad.grade, 'D');
+  });
+
+  test('gradeOf：平均损失与严重失误数共同决定评级', () => {
+    assert.equal(gradeOf(0, 1.9, { blunders: 0, mistakes: 0 }), 'A');
+    assert.equal(gradeOf(0, 10, { blunders: 1, mistakes: 2 }), 'B');
+    assert.equal(gradeOf(0, 20, { blunders: 2, mistakes: 4 }), 'C');
+    assert.equal(gradeOf(1, 50, { blunders: 0, mistakes: 0 }), 'D');
+    assert.equal(gradeOf(1, 4, { blunders: 1, mistakes: 1 }), 'B');
   });
 });
 
@@ -444,7 +463,8 @@ describe('mistakes 与阶段统计', () => {
       scorer: makeScorer((point) => (point.x === 8 && point.y === 8 ? 100 : 0)),
     });
     assert.match(stable.summary, /共 1 手/);
-    assert.match(stable.summary, /一致率 100%/);
+    assert.match(stable.summary, /AI 首选一致率 100%/);
+    assert.match(stable.summary, /平均损失 0/);
     assert.match(stable.summary, /评级 A/);
     assert.match(stable.summary, /整体稳定/);
 
