@@ -360,6 +360,7 @@ python ai/dist/go9_bot.py --selftest   # GTP / JSON / arena 协议自检
 - [Agent 接入](docs/AGENT-INTEGRATION.md)
 - [打榜与比赛提交](docs/ARENA.md)
 - [打榜记录与复盘](docs/ARENA-RESULTS.md)
+- [参考棋谱学习 175/176](docs/ARENA-STUDY-175-176.md)
 - [迭代记录与版本意识](docs/ITERATION.md)
 - [更新日志](CHANGELOG.md)
 
