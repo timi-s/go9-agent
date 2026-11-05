@@ -21,26 +21,26 @@
  * 新增 provider 只需实现该形状并加入下方 PROVIDERS 数组。
  */
 
-const HeuristicGoAgent = require('./heuristicGoAgent');
+const { createBuiltinAgent } = require('./builtinAgent');
 const httpProvider = require('./httpAgent');
 const katagoProvider = require('./katagoAgent');
 
 const FALLBACK_PROVIDER_ID = 'heuristic';
 
-/** 内置启发式 provider 适配层（按 provider 契约包装 HeuristicGoAgent 类）。 */
+/** 内置 provider 适配层：默认 Python AI（server/ai/go_ai.py），不可用时回退 JS MCTS。 */
 const heuristicProvider = {
   meta: {
     id: FALLBACK_PROVIDER_ID,
-    label: '内置启发式',
+    label: '内置 AI（Python MCTS）',
     kind: 'builtin',
-    description: '本地启发式评分 AI，永远可用；其它 provider 未配置或失败时自动回退到它。',
+    description: '本地 Python MCTS AI（server/ai/go_ai.py），无需配置；Python 不可用时自动回退 JS 内置 AI。',
     requires: [],
   },
   available() {
     return true;
   },
-  create() {
-    return new HeuristicGoAgent();
+  create({ env = process.env } = {}) {
+    return createBuiltinAgent({ env });
   },
 };
 

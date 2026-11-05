@@ -1,12 +1,15 @@
 {
   "name": "server",
-  "version": "1.1.0",
+  "version": "2.4.0",
   "description": "go9-agent 后端：Express 5 + Prisma 7 + SQLite + 可插拔 AI provider",
   "main": "src/index.js",
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "test": "node --test --test-isolation=none tests/",
+    "ai:check": "node scripts/check-ai.js",
+    "ai:bench": "node scripts/benchmark-ai.js",
+    "ai:bot": "node scripts/build-platform-bot.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

@@ -12,6 +12,7 @@
  * - AI_HTTP_API_KEY   可选，存在时发送 Authorization: Bearer <key>
  * - AI_HTTP_TIMEOUT_MS 可选，默认 15000
  * - AI_HTTP_PATH      可选，默认 /chat/completions
+ * - AI_HTTP_RETRY     可选，默认 1：模型给出非法/无法解析的着点时，把错误反馈给它并重试一次
  *
  * 导出的 provider 形状（见 docs/AGENT-INTEGRATION.md）：
  *   { meta, available(env), create({ env }) -> { getMove(game, { difficulty }) } }
@@ -103,6 +104,28 @@ function buildMessages(state, legalMoves) {
   ];
 }
 
+/**
+ * 重试消息：把模型上一手的输出和错误原因回灌，要求它从合法列表中重新选择。
+ * 大模型（尤其通用模型）经常给出已占点/编造坐标，一次反馈重试可显著提高成功率。
+ */
+function buildRetryMessages(state, legalMoves, previousContent, error) {
+  const size = Number.isInteger(state.size) ? state.size : BOARD_SIZE;
+  const legalText = legalMoves.map((move) => formatCoord(move.x, move.y, size)).join(', ');
+  const reason = error instanceof Error ? error.message : String(error);
+  return [
+    ...buildMessages(state, legalMoves),
+    { role: 'assistant', content: String(previousContent).slice(0, 2000) },
+    {
+      role: 'user',
+      content: [
+        `你刚才的输出不合法：${reason}`,
+        `请重新选择，并且只能从以下合法着点中选择：${legalText}`,
+        '停一手输出 {"move":"pass"}；只输出一个 JSON 对象，不要输出解释。',
+      ].join('\n'),
+    },
+  ];
+}
+
 function extractContent(data) {
   const choice = data && Array.isArray(data.choices) ? data.choices[0] : null;
   const message = choice && choice.message ? choice.message : null;
@@ -180,6 +203,9 @@ function create({ env = process.env } = {}) {
   const apiKey = typeof env.AI_HTTP_API_KEY === 'string' ? env.AI_HTTP_API_KEY.trim() : '';
   const timeoutMs = parseTimeoutMs(env.AI_HTTP_TIMEOUT_MS);
   const requestUrl = `${baseUrl}${normalizePath(env.AI_HTTP_PATH)}`;
+  // 非法着点重试次数：默认 1 次；设为 0 可关闭。
+  const retryRaw = Number(env.AI_HTTP_RETRY);
+  const retryCount = Number.isFinite(retryRaw) && retryRaw >= 0 ? Math.min(2, Math.floor(retryRaw)) : 1;
 
   async function postChatCompletion(messages) {
     const controller = new AbortController();
@@ -227,8 +253,18 @@ function create({ env = process.env } = {}) {
       const legalMoves = game.getLegalMoves();
       if (!Array.isArray(legalMoves) || legalMoves.length === 0) return null;
 
-      const content = await postChatCompletion(buildMessages(state, legalMoves));
-      return parseModelMove(content, state, legalMoves);
+      let content = await postChatCompletion(buildMessages(state, legalMoves));
+      let lastError = null;
+      for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+        try {
+          return parseModelMove(content, state, legalMoves);
+        } catch (error) {
+          lastError = error;
+          if (attempt >= retryCount) break;
+          content = await postChatCompletion(buildRetryMessages(state, legalMoves, content, error));
+        }
+      }
+      throw lastError;
     },
   };
 }

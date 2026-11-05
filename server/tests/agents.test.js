@@ -470,7 +470,9 @@ test('httpAgent：非法列/非法行/已占点/HTTP 500 都会抛错', async ()
       else sendJson(res, 500, { error: 'boom' });
     },
     async ({ base }) => {
-      const agent = httpAgent.create({ env: { AI_HTTP_BASE_URL: base, AI_HTTP_MODEL: 'test-model' } });
+      const agent = httpAgent.create({
+        env: { AI_HTTP_BASE_URL: base, AI_HTTP_MODEL: 'test-model', AI_HTTP_RETRY: '0' },
+      });
       // 黑 A1 占位，白方行棋：A1 对白方是非法着点。
       const game = createGame([[0, 8]]);
 
@@ -478,6 +480,23 @@ test('httpAgent：非法列/非法行/已占点/HTTP 500 都会抛错', async ()
       await assert.rejects(agent.getMove(game, { difficulty: 'medium' }), /无法解析/); // 行 9/列 Z 非法
       await assert.rejects(agent.getMove(game, { difficulty: 'medium' }), /非法着点/); // A1 已占
       await assert.rejects(agent.getMove(game, { difficulty: 'medium' }), /HTTP 500/);
+    },
+  );
+});
+
+test('httpAgent：非法着点会把错误回灌给模型并重试一次', async () => {
+  const responses = ['{"move":"A1"}', '{"move":"E5"}'];
+  await withMockChatServer(
+    async ({ res, index }) => sendJson(res, 200, completion(responses[Math.min(index, responses.length - 1)])),
+    async ({ base, requests }) => {
+      const agent = httpAgent.create({ env: { AI_HTTP_BASE_URL: base, AI_HTTP_MODEL: 'test-model' } });
+      // 黑 A1 占位，白方行棋：模型第一次给 A1 非法，重试应被纠正。
+      const game = createGame([[0, 8]]);
+      assert.deepEqual(await agent.getMove(game, { difficulty: 'medium' }), { x: 4, y: 4 });
+      assert.equal(requests.length, 2, '非法着点后应重试一次');
+      const retryPrompt = JSON.stringify(requests[1].body.messages);
+      assert.match(retryPrompt, /不合法|不合规|非法/);
+      assert.match(retryPrompt, /合法着点/);
     },
   );
 });

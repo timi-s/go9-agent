@@ -20,7 +20,7 @@ const cors = require('cors');
 const { GameStore, DEFAULT_LIST_LIMIT } = require('./gameStore');
 const { isDatabaseUsable } = require('./db');
 const { serializeSgf } = require('./sgf');
-const HeuristicGoAgent = require('./agents/heuristicGoAgent');
+const BuiltinGoAgent = require('./agents/builtinAgent');
 const pkg = require('../package.json');
 
 const DEFAULT_VERSION = (pkg && pkg.version) || '1.0.0';
@@ -28,12 +28,12 @@ const DIFFICULTIES = new Set(['easy', 'medium', 'hard']);
 const PLAYER_COLORS = new Set(['black', 'white']);
 const BOARD_SIZE = 9;
 
-const HEURISTIC_META = {
+const BUILTIN_META = {
   id: 'heuristic',
-  label: '内置启发式 AI',
+  label: '内置 AI（Python MCTS）',
   kind: 'builtin',
   available: true,
-  description: '内置启发式 AI（无需外部配置，永远可用）',
+  description: '本地 Python MCTS AI（server/ai/go_ai.py），无需配置；Python 不可用时自动回退 JS 内置 AI。',
   requires: [],
 };
 
@@ -93,11 +93,11 @@ function storeFailure(res, result) {
 
 /** heuristic-only registry：registry 模块尚未就绪 / 初始化失败时的兜底。 */
 function createHeuristicOnlyRegistry({ agent } = {}) {
-  const heuristicAgent = agent && typeof agent.getMove === 'function' ? agent : new HeuristicGoAgent();
+  const heuristicAgent = agent && typeof agent.getMove === 'function' ? agent : new BuiltinGoAgent();
   return {
     defaultProvider: 'heuristic',
     list() {
-      return [{ ...HEURISTIC_META }];
+      return [{ ...BUILTIN_META }];
     },
     get(id) {
       return id === 'heuristic' ? heuristicAgent : null;
