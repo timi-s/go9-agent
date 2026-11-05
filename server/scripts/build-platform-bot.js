@@ -17,7 +17,9 @@ const SERVER_DIR = path.resolve(__dirname, '..');
 const CORE = path.join(SERVER_DIR, 'ai', 'go_ai.py');
 const ADAPTER = path.join(SERVER_DIR, 'ai', 'platform_adapter.py');
 const LEARNED = path.join(SERVER_DIR, 'ai', 'learned_data.py');
-const OUT = process.argv[2] ? path.resolve(process.argv[2]) : path.join(SERVER_DIR, 'ai', 'dist', 'go9_bot.py');
+const ARGS = process.argv.slice(2);
+const NO_LEARNED = ARGS.includes('--no-learned');
+const OUT = ARGS.find((v) => !v.startsWith('--')) ? path.resolve(ARGS.find((v) => !v.startsWith('--'))) : path.join(SERVER_DIR, 'ai', 'dist', 'go9_bot.py');
 
 const HEADER = `#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
@@ -51,7 +53,7 @@ function main() {
   if (cut < 0) throw new Error('go_ai.py 中找不到 def main()，无法生成单文件 bot');
 
   const adapter = fs.readFileSync(ADAPTER, 'utf8');
-  const learned = fs.existsSync(LEARNED) ? fs.readFileSync(LEARNED, 'utf8') : '';
+  const learned = (!NO_LEARNED && fs.existsSync(LEARNED)) ? fs.readFileSync(LEARNED, 'utf8') : '';
   const output = `${HEADER}${core.slice(0, cut)}\n\n${learned}\n\n${adapter}`;
 
   fs.mkdirSync(path.dirname(OUT), { recursive: true });

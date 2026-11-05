@@ -15,7 +15,7 @@ from itertools import chain
 
 GTP_COLUMNS = "ABCDEFGHJKLMNOPQRSTUVWXYZ"  # GTP 坐标跳过 I
 BOT_NAME = "go9-agent"
-BOT_VERSION = "2.5.0"
+BOT_VERSION = "2.8.0"
 GTP_COMMANDS = {
     "name", "version", "protocol_version", "list_commands", "known_command",
     "boardsize", "komi", "clear_board", "play", "genmove", "undo", "quit",
@@ -141,6 +141,27 @@ def _state_from_board(board, komi):
     }
 
 
+def _cgroup_cpu_limit():
+    """读取容器 cgroup 的 CPU 配额；平台学生容器常见为 1 核。"""
+    for path in ("/sys/fs/cgroup/cpu.max", "/sys/fs/cgroup/cpu/cpu.cfs_quota_us"):
+        try:
+            if path.endswith("cpu.max"):
+                parts = open(path, encoding="utf-8").read().split()
+                if not parts or parts[0] == "max":
+                    continue
+                quota, period = float(parts[0]), float(parts[1])
+            else:
+                quota = float(open(path, encoding="utf-8").read().strip())
+                if quota <= 0:
+                    continue
+                period = float(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us", encoding="utf-8").read().strip())
+            if quota > 0 and period > 0:
+                return max(1, int(quota / period))
+        except (OSError, ValueError, IndexError):
+            continue
+    return None
+
+
 def _bot_workers():
     raw = os.environ.get("BOT_WORKERS")
     if raw:
@@ -148,7 +169,9 @@ def _bot_workers():
             return max(1, min(int(raw), 12))
         except ValueError:
             pass
-    return max(1, min(8, os.cpu_count() or 1))
+    # 在 1 核学生容器内，多进程只会平分同一个核；用单进程深搜索更有效。
+    limit = _cgroup_cpu_limit() or os.cpu_count() or 1
+    return max(1, min(8, int(limit)))
 
 
 def _call_ai(board, komi, budget_ms, seed=None):
@@ -795,6 +818,12 @@ def run_plain_stream(first_line, stream, seed=None):
 # 入口：自动识别协议
 # ----------------------------------------------------------------------------
 def main():
+    if "_ensure_record_tables" in globals():
+        try:
+            _ensure_record_tables()
+        except Exception:  # noqa: BLE001
+            pass
+
     args = sys.argv[1:]
     if "--selftest" in args:
         selftest()

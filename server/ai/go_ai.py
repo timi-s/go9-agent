@@ -578,6 +578,9 @@ def score_moves(board):
             score += 2.0
 
         score += pattern_score_bonus(board, x, y)
+        _guide = globals().get("_PRIOR_GUIDE")
+        if _guide is not None and (x, y) == _guide:
+            score += globals().get("_PRIOR_BONUS", 0.0)
         score += shape_score_bonus(board, x, y)
 
         scored.append((x, y, score))
@@ -586,32 +589,22 @@ def score_moves(board):
 
 def should_pass(board, legal, komi):
     """终局判断：只有对手刚停一手时才考虑停手。
-    - 停一手能赢：立刻停，结束对局；
-    - 领先：停一手也赢，停；
-    - 落后：只有当存在能实质改善局面（目差 +MARGIN_PASS 以上）的点时才继续，
-      否则停一手结束，避免在死局里反复填子把自己填死、把分差越拉越大。"""
+    - 只有己方明显领先（>5 目）才主动停手，避免“以为领先”提前结束；
+    - 落后/接近时继续找能改善局面的点，防止把可翻盘的对局直接判死。"""
     if board.pass_count < 1:
         return False
 
     me = board.to_move
+    black, white = board.score(komi)
+    margin = (black - white) if me == BLACK else (white - black)
+    if margin <= 5.0:
+        return False
 
     probe = board.clone()
     probe.pass_move()
-    if probe.winner(komi) == me:
-        return True
-
-    black, white = board.score(komi)
-    before = (black - white) if me == BLACK else (white - black)
-    best_gain = -999.0
-    for move in legal:
-        trial = board.clone()
-        trial.play(move)
-        black, white = trial.score(komi)
-        after = (black - white) if me == BLACK else (white - black)
-        gain = after - before
-        if gain > best_gain:
-            best_gain = gain
-    return best_gain <= MARGIN_PASS
+    if probe.winner(komi) != me:
+        return False
+    return True
 
 
 OPENING_BOOK_BLACK = {
@@ -792,6 +785,215 @@ def katago_book_move(board):
     return None
 
 
+_RECORDS_LOADED = False
+
+
+def _tables_json_path():
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        here = os.getcwd()
+    for candidate in (
+        os.path.join(here, 'tables.json'),
+        os.path.join(here, 'data', 'tables.json'),
+        os.path.join(os.getcwd(), 'tables.json'),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _load_tables_json(path):
+    try:
+        data = json.load(open(path, encoding='utf-8'))
+    except Exception:
+        return False
+
+    def cell_tuple(text):
+        return tuple(int(v) for v in text.split(','))
+
+    def script_table(src):
+        out = {}
+        for key, mv in (src or {}).items():
+            out[cell_tuple(key)] = mv if mv == 'PASS' else (int(mv[0]), int(mv[1]))
+        return out
+
+    def book_table(src):
+        return {cell_tuple(k): (int(v[0]), int(v[1])) for k, v in (src or {}).items()}
+
+    pattern = {}
+    for ph, table in (data.get('pattern') or {}).items():
+        conv = {}
+        for key, prob in table.items():
+            nums = [int(v) for v in key.split(',')]
+            conv[(nums[0], tuple(nums[1:]))] = prob
+        pattern[int(ph)] = conv
+    shape = {}
+    for ph, table in (data.get('shape') or {}).items():
+        shape[int(ph)] = {str(k): v for k, v in table.items()}
+    means = {int(k): v for k, v in (data.get('means') or {}).items()}
+
+    globals()['SCRIPTS_BLACK'] = script_table(data.get('scripts_black'))
+    globals()['SCRIPTS_WHITE'] = script_table(data.get('scripts_white'))
+    globals()['KATAGO_BOOK_BLACK'] = book_table(data.get('book_black'))
+    globals()['KATAGO_BOOK_WHITE'] = book_table(data.get('book_white'))
+    globals()['PATTERN_TABLES'] = pattern
+    globals()['SHAPE_TABLES'] = shape
+    globals()['SHAPE_MEANS'] = means
+    return True
+
+
+def _records_path():
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except NameError:
+        here = os.getcwd()
+    for candidate in (
+        os.path.join(here, 'records.json'),
+        os.path.join(here, 'data', 'records.json'),
+        os.path.join(os.getcwd(), 'records.json'),
+    ):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _pattern_key_from_cells(cells, x, y, me):
+    opp = WHITE if me == BLACK else BLACK
+    values = []
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            nx = x + dx
+            ny = y + dy
+            if nx < 0 or ny < 0 or nx >= 9 or ny >= 9:
+                values.append(3)
+            else:
+                v = cells[ny * 9 + nx]
+                values.append(0 if v == EMPTY else (1 if v == me else 2))
+    edge = min(x, y, 8 - x, 8 - y)
+    return (min(edge, 2), tuple(values))
+
+
+def _shape_bits_from_cells(cells, x, y, me):
+    opp = WHITE if me == BLACK else BLACK
+    bits = 0
+    for offsets, shift in ((_KNIGHT_OFFSETS, 0), (_DIAG1_OFFSETS, 2), (_ORTH2_OFFSETS, 4)):
+        own = False
+        other = False
+        for dx, dy in offsets:
+            nx = x + dx
+            ny = y + dy
+            if 0 <= nx < 9 and 0 <= ny < 9:
+                v = cells[ny * 9 + nx]
+                if v == me:
+                    own = True
+                elif v == opp:
+                    other = True
+        if own:
+            bits |= (1 << shift)
+        if other:
+            bits |= (1 << (shift + 1))
+    return bits
+
+
+def _build_from_records(path):
+    """从随包棋谱库（records.json）现场构建开局复刻/棋形表。"""
+    try:
+        payload = json.load(open(path, encoding='utf-8'))
+    except Exception:
+        return None
+    games = payload.get('games') or []
+    scripts = {BLACK: {}, WHITE: {}}
+    pattern_total = {0: {}, 1: {}, 2: {}}
+    pattern_pos = {0: {}, 1: {}, 2: {}}
+    shape_total = {0: {}, 1: {}, 2: {}}
+    shape_pos = {0: {}, 1: {}, 2: {}}
+    wins = 0
+    for game in games:
+        winner = game.get('winner')
+        student = game.get('student')
+        moves = game.get('moves') or []
+        if winner is None or winner != student:
+            continue
+        board = Board(9)
+        ok = True
+        for entry in moves:
+            color = int(entry[0])
+            board.to_move = color
+            if len(entry) < 3:
+                continue
+            x, y = int(entry[1]), int(entry[2])
+            idx = y * 9 + x
+            if not board.is_legal(idx, color):
+                ok = False
+                break
+            if color == winner:
+                key = tuple(board.cells)
+                scripts[color][key] = (x, y)
+                stones = sum(1 for v in board.cells if v != EMPTY)
+                ph = 0 if stones < 24 else (1 if stones < 60 else 2)
+                for yy in range(9):
+                    for xx in range(9):
+                        if board.cells[yy * 9 + xx] != EMPTY:
+                            continue
+                        pk = _pattern_key_from_cells(board.cells, xx, yy, color)
+                        sk = _shape_bits_from_cells(board.cells, xx, yy, color)
+                        pattern_total[ph][pk] = pattern_total[ph].get(pk, 0) + 1
+                        shape_total[ph][sk] = shape_total[ph].get(sk, 0) + 1
+                        if xx == x and yy == y:
+                            pattern_pos[ph][pk] = pattern_pos[ph].get(pk, 0) + 1
+                            shape_pos[ph][sk] = shape_pos[ph].get(sk, 0) + 1
+            board.play(idx)
+        if ok:
+            wins += 1
+
+    pattern_tables = {}
+    shape_tables = {}
+    means = {}
+    for ph in (0, 1, 2):
+        out = {}
+        for key, cnt in pattern_total[ph].items():
+            if cnt < 5:
+                continue
+            prob = (pattern_pos[ph].get(key, 0) + 0.5) / (cnt + 1.0)
+            if abs(prob - 0.5) >= 0.07:
+                out[key] = round(prob, 4)
+        pattern_tables[ph] = out
+        sout = {}
+        total_points = sum(shape_total[ph].values())
+        positives = sum(shape_pos[ph].values())
+        means[ph] = round(positives / total_points, 6) if total_points else 0.0
+        for key, cnt in shape_total[ph].items():
+            if cnt < 40:
+                continue
+            sout[str(key)] = round((shape_pos[ph].get(key, 0) + 0.5) / (cnt + 1.0), 5)
+        shape_tables[ph] = sout
+    return {'scripts': scripts, 'pattern': pattern_tables, 'shape': shape_tables, 'means': means, 'wins': wins}
+
+
+def _ensure_record_tables():
+    global _RECORDS_LOADED
+    if _RECORDS_LOADED:
+        return
+    _RECORDS_LOADED = True
+    tables_path = _tables_json_path()
+    if tables_path and _load_tables_json(tables_path):
+        return
+    path = _records_path()
+    if not path:
+        return
+    built = _build_from_records(path)
+    if not built:
+        return
+    globals()['SCRIPTS_BLACK'] = built['scripts'][BLACK]
+    globals()['SCRIPTS_WHITE'] = built['scripts'][WHITE]
+    globals()['PATTERN_TABLES'] = built['pattern']
+    globals()['SHAPE_TABLES'] = built['shape']
+    globals()['SHAPE_MEANS'] = built['means']
+
+
 def scripted_move(board):
     """打榜胜局逐手复刻：局面与赢棋方的局面完全一致时，直接走当时的下一手。"""
     table = None
@@ -864,6 +1066,7 @@ def critical_save_move(board, children):
 
 
 def choose_move(state, difficulty="medium", seed=None, root_stats=False, max_ms_override=None):
+    global _PRIOR_GUIDE, _PRIOR_BONUS
     size = int(state.get("size") or SIZE)
     if size != SIZE:
         raise ValueError(f"只支持 {SIZE} 路棋盘，收到 size={size}")
@@ -891,7 +1094,22 @@ def choose_move(state, difficulty="medium", seed=None, root_stats=False, max_ms_
         return {"move": None, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "no_legal_move"}}
 
     script_move = scripted_move(board)
-    if script_move is not None:
+    _PRIOR_GUIDE = None
+    _PRIOR_BONUS = 0.0
+    if isinstance(script_move, tuple):
+        _PRIOR_GUIDE = (int(script_move[0]), int(script_move[1]))
+        _PRIOR_BONUS = 65.0
+    else:
+        _kbook = katago_book_move(board)
+        if _kbook is not None:
+            _PRIOR_GUIDE = (int(_kbook[0]), int(_kbook[1]))
+            _PRIOR_BONUS = 45.0
+        else:
+            _obook = opening_book_move(board)
+            if _obook is not None:
+                _PRIOR_GUIDE = (int(_obook[0]), int(_obook[1]))
+                _PRIOR_BONUS = 35.0
+    if False:  # 软棋谱：交给 MCTS 决定
         if script_move == "PASS":
             return {"move": None, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "script_pass"}}
         sx, sy = int(script_move[0]), int(script_move[1])
@@ -903,16 +1121,16 @@ def choose_move(state, difficulty="medium", seed=None, root_stats=False, max_ms_
 
     # 开局棋谱（来自击败 baseline 的实战）；没有匹配则占天元
     book_move = opening_book_move(board)
-    if book_move is not None:
+    if False:  # 软棋谱：交给 MCTS 决定
         bx, by = book_move
         if 0 <= bx < size and 0 <= by < size and board.is_legal(by * size + bx, board.to_move):
             return {"move": {"x": bx, "y": by}, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "book"}}
     kg_move = katago_book_move(board)
-    if kg_move is not None:
+    if False:  # 软棋谱：交给 MCTS 决定
         kx, ky = kg_move
         if 0 <= kx < size and 0 <= ky < size and board.is_legal(ky * size + kx, board.to_move):
             return {"move": {"x": kx, "y": ky}, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "katago_book"}}
-    if all(v == EMPTY for v in board.cells):
+    if False and all(v == EMPTY for v in board.cells):  # 软开局
         center = size // 2
         return {"move": {"x": center, "y": center}, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "opening"}}
 
@@ -920,6 +1138,8 @@ def choose_move(state, difficulty="medium", seed=None, root_stats=False, max_ms_
     cfg = DIFFICULTY[level]
     max_ms = cfg["max_ms"] if max_ms_override is None else max_ms_override
     rng = random.Random((seed if seed is not None else 2026) ^ hash_state(board))
+
+    _ensure_record_tables()
 
     priors = softmax_priors(score_moves(board), legal, size)
     root = Node(None, 0, -1, board)
@@ -1166,7 +1386,7 @@ def main():
         sys.stdout.write(json.dumps(result, ensure_ascii=False))
         sys.stdout.flush()
         return 0
-    except Exception as exc:  # noqa: BLE001 - 任何错误都反馈给 Node 端处理
+    except Exception as exc:  # noqa: BLE001
         sys.stdout.write(json.dumps({"error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
         sys.stdout.flush()
         return 1

@@ -70,7 +70,7 @@
 ### `GET /api/health`
 
 ```json
-{ "ok": true, "version": "2.4.1", "db": true, "uptime": 12.3 }
+{ "ok": true, "version": "2.8.0", "db": true, "uptime": 12.3 }
 ```
 
 `db=false` 表示数据库不可用，但内存对局仍可正常游玩（持久化降级）；

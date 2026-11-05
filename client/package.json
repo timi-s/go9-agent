@@ -1,7 +1,7 @@
 {
   "name": "go9-client",
   "private": true,
-  "version": "2.4.1",
+  "version": "2.8.0",
   "description": "九路围棋前端（React 19 + Vite 8）：SVG 棋盘、可插拔 AI 对弈、赛后复盘与历史",
   "type": "module",
   "scripts": {
