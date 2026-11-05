@@ -351,6 +351,7 @@ class GameStore {
       id: true,
       boardState: true,
       moveHistory: true,
+      analysisJson: true,
       status: true,
       winner: true,
       aiProvider: true,
@@ -387,7 +388,7 @@ class GameStore {
       komi: typeof record.komi === 'number' ? record.komi : this.komi,
       playerColor: null,
       aiProvider: normalizeProvider(record.aiProvider) || this.defaultProvider,
-      analysis: null,
+      analysis: safeParseJson(record.analysisJson, null),
       winnerOverride: null,
       resultOverride: null,
     };

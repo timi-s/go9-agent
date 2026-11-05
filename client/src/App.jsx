@@ -188,7 +188,8 @@ export default function App() {
       } finally {
         setThinking(false);
       }
-      if (current && current.winner && !next.winner) refreshGames();
+      // 刷新历史列表中的手数/更新时间，避免进行中的对局一直显示 0 手。
+      refreshGames();
     },
     [mode, gameId, difficulty, provider, refreshGames, noteFallback],
   );
@@ -225,11 +226,13 @@ export default function App() {
 
       let nextId = null;
       let nextState = null;
+      let nextAnalysis = null;
       if (recent.length > 0) {
         try {
           const loaded = await api.getGame(recent[0].id);
           nextId = loaded.id;
           nextState = loaded.state;
+          nextAnalysis = loaded.analysis || null;
         } catch {
           // 历史对局读取失败时退回新建对局。
           nextState = null;
@@ -243,7 +246,8 @@ export default function App() {
       }
       setGameId(nextId);
       setState(nextState);
-      resetAnalysis();
+      setAnalysis(nextAnalysis);
+      setAnalysisError(null);
     } catch (error) {
       setBootError(api.describeError(error));
     } finally {
@@ -255,7 +259,7 @@ export default function App() {
       .health()
       .then((payload) => setDbOk(payload.db !== false))
       .catch(() => setDbOk(null));
-  }, [refreshGames, resetAnalysis]);
+  }, [refreshGames]);
 
   useEffect(() => {
     if (bootStartedRef.current) return;
@@ -374,7 +378,8 @@ export default function App() {
       const payload = await api.getGame(id);
       setGameId(payload.id);
       setState(payload.state);
-      resetAnalysis();
+      setAnalysis(payload.analysis || null);
+      setAnalysisError(null);
       setToast(null);
     });
   };

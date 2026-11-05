@@ -76,10 +76,19 @@ function normalizeProviders(providers) {
   return result;
 }
 
+function redactSensitive(text) {
+  return String(text)
+    .replace(/(authorization\s*[=:]\s*)(?:Bearer\s+)?[^\s,;"']+/gi, '$1Bearer ***')
+    .replace(/((?:api[_-]?key)\s*[=:]\s*)[^\s,;"']+/gi, '$1***')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer ***')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-***')
+    .slice(0, 300);
+}
+
 function formatError(error) {
-  if (error instanceof Error && error.message) return error.message;
+  if (error instanceof Error && error.message) return redactSensitive(error.message);
   const text = String(error);
-  return !text || text === 'undefined' ? 'provider 执行失败' : text;
+  return !text || text === 'undefined' ? 'provider 执行失败' : redactSensitive(text);
 }
 
 function isLegalResult(game, result) {

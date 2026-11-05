@@ -66,6 +66,12 @@ function parseTimeout(env = process.env) {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_TIMEOUT_MS;
 }
 
+function parseSeed(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.floor(parsed) >>> 0 : undefined;
+}
+
 function isAvailable(env = process.env) {
   try {
     if (!fs.existsSync(resolveScriptPath(env))) return false;
@@ -81,7 +87,9 @@ class PythonGoAgent {
    */
   constructor({ env = process.env, seed } = {}) {
     this.env = env;
-    this.seed = Number.isFinite(seed) ? Math.floor(seed) >>> 0 : undefined;
+    const explicitSeed = parseSeed(seed);
+    const envSeed = parseSeed(env && env.LOCAL_AI_SEED);
+    this.seed = explicitSeed !== undefined ? explicitSeed : envSeed;
     this.command = resolvePythonCommand(env);
     this.script = resolveScriptPath(env);
     this.timeoutMs = parseTimeout(env);
@@ -160,6 +168,9 @@ class PythonGoAgent {
       let stderr = '';
       let settled = false;
 
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+
       const finish = (error, value) => {
         if (settled) return;
         settled = true;
@@ -186,12 +197,25 @@ class PythonGoAgent {
       child.on('error', (error) => {
         finish(new Error(`无法启动 Python AI（${this.command}）：${error.message}`));
       });
+      child.stdin.on('error', (error) => {
+        finish(new Error(`向 Python AI 写入请求失败：${error.message}`));
+      });
       child.on('close', (code) => {
+        const text = stdout.trim();
         if (code !== 0) {
-          finish(new Error(`Python AI 退出码 ${code}${stderr ? `：${stderr.trim().slice(0, 300)}` : ''}`));
+          // Python 异常时会先在 stdout 写 {"error": ...} 再以非 0 退出，优先保留该诊断。
+          let detail = '';
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed && parsed.error) detail = String(parsed.error);
+          } catch {
+            // 不是 JSON，退回 stderr
+          }
+          if (!detail) detail = stderr.trim();
+          finish(new Error(`Python AI 退出码 ${code}${detail ? `：${detail.slice(0, 300)}` : ''}`));
           return;
         }
-        finish(null, stdout.trim());
+        finish(null, text);
       });
 
       try {

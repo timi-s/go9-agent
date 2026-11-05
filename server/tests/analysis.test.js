@@ -110,6 +110,8 @@ function assertAnalysisShape(analysis) {
     assert.ok(mistake.loss >= 15);
     assert.ok(['inaccuracy', 'mistake', 'blunder'].includes(mistake.severity));
     assert.ok(['self_atari', 'missed_capture', 'filled_own_eye', 'early_first_line', 'inefficient'].includes(mistake.reason));
+    assert.equal(typeof mistake.reasonLabel, 'string');
+    assert.ok(mistake.reasonLabel.length > 0);
   }
   assert.equal(typeof analysis.summary, 'string');
   assert.ok(analysis.summary.length > 0);

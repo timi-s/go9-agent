@@ -15,7 +15,7 @@ from itertools import chain
 
 GTP_COLUMNS = "ABCDEFGHJKLMNOPQRSTUVWXYZ"  # GTP 坐标跳过 I
 BOT_NAME = "go9-agent"
-BOT_VERSION = "2.4.0"
+BOT_VERSION = "2.5.0"
 GTP_COMMANDS = {
     "name", "version", "protocol_version", "list_commands", "known_command",
     "boardsize", "komi", "clear_board", "play", "genmove", "undo", "quit",

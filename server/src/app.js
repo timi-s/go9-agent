@@ -222,7 +222,7 @@ function createApp(options = {}) {
   app.get('/api/games/:id', wrap(async (req, res) => {
     const entry = await store.get(req.params.id);
     if (!entry) return jsonError(res, 404, 'not_found', '对局不存在');
-    return res.json({ ok: true, id: entry.id, state: store.snapshot(entry) });
+    return res.json({ ok: true, id: entry.id, state: store.snapshot(entry), analysis: entry.analysis || null });
   }));
 
   // ------------------------------------------------------------ 落子

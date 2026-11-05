@@ -640,6 +640,11 @@ describe('HTTP API', () => {
     assert.equal(typeof record.analysisJson, 'string');
     assert.deepEqual(JSON.parse(record.analysisJson), analysis);
 
+    // GET /api/games/:id 必须带回已保存的 analysis，前端才能避免每次刷新重复复盘。
+    const reloaded = await client.api(`/api/games/${id}`);
+    assert.equal(reloaded.status, 200);
+    assert.deepEqual(reloaded.json.analysis, analysis);
+
     const missing = await client.api('/api/games/does-not-exist/analyze', { method: 'POST' });
     assert.equal(missing.status, 404);
     assert.equal(missing.json.reason, 'not_found');
@@ -899,6 +904,27 @@ describe('AI Provider API', () => {
       assert.equal(restored.status, 200);
       assert.equal(restored.json.state.aiProvider, 'fake');
       assert.equal(restored.json.state.moveCount, 1);
+    });
+  });
+
+  test('重启后从 DB 恢复已保存的 analysis（无需重复复盘）', async () => {
+    const created = await client.api('/api/games', { method: 'POST', body: { aiProvider: 'heuristic' } });
+    const id = created.json.id;
+    for (const [x, y] of [[0, 0], [8, 8], [2, 2], [6, 6]]) {
+      await client.api(`/api/games/${id}/move`, { method: 'POST', body: { x, y } });
+    }
+    const analyzed = await client.api(`/api/games/${id}/analyze`, { method: 'POST' });
+    assert.equal(analyzed.status, 200);
+    const expected = analyzed.json.analysis;
+
+    await withHarness({ db, registry }, async (newBase) => {
+      const newClient = makeClient(newBase);
+      const restored = await newClient.api(`/api/games/${id}`);
+      assert.equal(restored.status, 200);
+      assert.ok(restored.json.analysis, 'analysis should be restored from analysisJson');
+      assert.equal(restored.json.analysis.grade, expected.grade);
+      assert.equal(restored.json.analysis.totalMoves, expected.totalMoves);
+      assert.deepEqual(restored.json.analysis, expected);
     });
   });
 });

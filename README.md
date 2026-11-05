@@ -208,7 +208,7 @@ cd client && npm run build
 
 测试覆盖：提子/自杀/劫、PASS 终局与数子、悔棋、认输、AI 合法性、provider 注册与回退、
 HTTP/KataGo 适配（本地 mock）、Python 内置 AI（子进程协议 + 回退）、复盘分级/阶段/弱点、API 路由与参数校验。
-当前后端共 **130** 项测试通过；前端以 oxlint（0 warning）+ Vite 生产构建作为回归门槛。
+当前后端共 **133** 项测试通过；前端以 oxlint（0 warning）+ Vite 生产构建作为回归门槛。
 
 ## API
 
@@ -243,6 +243,8 @@ HTTP/KataGo 适配（本地 mock）、Python 内置 AI（子进程协议 + 回�
 
 内置 AI 的源码就是 **[server/ai/go_ai.py](server/ai/go_ai.py)**（纯标准库，无第三方依赖）：
 静态启发式评分先验 + 蒙特卡洛树搜索（PUCT/UCT）+ 随机模拟，收官阶段自动 stop。
+Web 运行时会加载同目录的 `learned_data.py`（KataGo 自对弈开局书 / 分阶段棋形先验 /
+打榜胜局逐手复刻表），与比赛版单文件 bot 使用同一套知识；文件缺失时自动退化为纯 MCTS。
 Node 后端通过子进程调用它（协议见文件头注释：stdin JSON 请求 → stdout JSON 着点），
 Python 不可用/超时/返回非法着点时自动回退 JS 内置 MCTS，对局不会卡死。
 

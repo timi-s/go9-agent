@@ -339,6 +339,21 @@ test('registry：注入自定义 provider（成功 / 抛错 / 非法点 / null=p
   assert.match(thrown.fallback.reason, /fake provider exploded/);
   assertLegal(game, thrown.move, 'thrown fallback');
 
+  // 上游/自定义 provider 的错误信息可能带凭据，fallback.reason 必须脱敏。
+  const leakyProvider = {
+    meta: { id: 'fake-leaky', label: 'Fake Leaky', kind: 'api', description: '', requires: [] },
+    available: () => true,
+    create: () => ({
+      getMove: async () => {
+        throw new Error('upstream said Authorization: Bearer sk-test-key-123456789');
+      },
+    }),
+  };
+  const leakyRegistry = createAgentRegistry({ env: {}, providers: [leakyProvider] });
+  const leaky = await leakyRegistry.move('fake-leaky', game);
+  assert.doesNotMatch(leaky.fallback.reason, /sk-test-key-123456789/);
+  assert.match(leaky.fallback.reason, /Bearer \*\*\*/);
+
   const occupiedGame = createGame([[4, 4]]);
   const illegalProvider = {
     meta: { id: 'fake-illegal', label: 'Fake Illegal', kind: 'api', description: '', requires: [] },
@@ -458,6 +473,21 @@ test('httpAgent：坐标列 A–J 跳过 I、行 1–9 自下而上（J1=(8,8)�
       const game = new Go9Game();
       assert.deepEqual(await agent.getMove(game, { difficulty: 'medium' }), { x: 8, y: 8 });
       assert.deepEqual(await agent.getMove(game, { difficulty: 'medium' }), { x: 4, y: 0 });
+    },
+  );
+});
+
+test('httpAgent：上游错误体中的 key 会被脱敏', async () => {
+  await withMockChatServer(
+    async ({ res }) => sendJson(res, 401, { error: 'bad key Authorization: Bearer sk-test-key-123456789' }),
+    async ({ base }) => {
+      const agent = httpAgent.create({ env: { AI_HTTP_BASE_URL: base, AI_HTTP_MODEL: 'test-model' } });
+      await assert.rejects(agent.getMove(createGame(), { difficulty: 'medium' }), (error) => {
+        assert.doesNotMatch(error.message, /sk-test-key-123456789/);
+        assert.match(error.message, /HTTP 401/);
+        assert.match(error.message, /Bearer \*\*\*/);
+        return true;
+      });
     },
   );
 });

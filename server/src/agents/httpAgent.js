@@ -54,6 +54,19 @@ function parseTimeoutMs(value) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_TIMEOUT_MS;
 }
 
+/**
+ * 上游错误体可能回显 Authorization / API Key；只把脱敏后的短摘要交给前端。
+ * 正常产品路径不会把 key 放进 URL/请求体，但代理或异常服务可能回显。
+ */
+function redactSensitive(text) {
+  return String(text)
+    .replace(/(authorization\s*[=:]\s*)(?:Bearer\s+)?[^\s,;"']+/gi, '$1Bearer ***')
+    .replace(/((?:api[_-]?key)\s*[=:]\s*)[^\s,;"']+/gi, '$1***')
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer ***')
+    .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-***')
+    .slice(0, 200);
+}
+
 /** 把 (x, y) 转成界面坐标，例如 (4,4) -> "E5"。 */
 function formatCoord(x, y, size = BOARD_SIZE) {
   return `${COLUMNS[x]}${size - y}`;
@@ -203,8 +216,12 @@ function create({ env = process.env } = {}) {
   const apiKey = typeof env.AI_HTTP_API_KEY === 'string' ? env.AI_HTTP_API_KEY.trim() : '';
   const timeoutMs = parseTimeoutMs(env.AI_HTTP_TIMEOUT_MS);
   const requestUrl = `${baseUrl}${normalizePath(env.AI_HTTP_PATH)}`;
-  // 非法着点重试次数：默认 1 次；设为 0 可关闭。
-  const retryRaw = Number(env.AI_HTTP_RETRY);
+  // 非法着点重试次数：默认 1 次；设为 0 可关闭；留空仍按默认 1 处理。
+  const retryRawText = env.AI_HTTP_RETRY;
+  const retryRaw =
+    retryRawText !== undefined && retryRawText !== null && String(retryRawText).trim() !== ''
+      ? Number(retryRawText)
+      : NaN;
   const retryCount = Number.isFinite(retryRaw) && retryRaw >= 0 ? Math.min(2, Math.floor(retryRaw)) : 1;
 
   async function postChatCompletion(messages) {
@@ -224,7 +241,7 @@ function create({ env = process.env } = {}) {
 
       if (!response.ok) {
         const detail = await response.text().catch(() => '');
-        throw new Error(`HTTP AI 返回 HTTP ${response.status}${detail ? `：${detail.slice(0, 200)}` : ''}`);
+        throw new Error(`HTTP AI 返回 HTTP ${response.status}${detail ? `：${redactSensitive(detail)}` : ''}`);
       }
 
       let data;

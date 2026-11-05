@@ -11,8 +11,15 @@ const SEVERITY_LABELS = {
 };
 const WEAKNESS_ORDER = ['high', 'medium', 'low'];
 const WEAKNESS_SEVERITY_LABELS = { high: '高', medium: '中', low: '低' };
+const REASON_LABELS = {
+  self_atari: '自陷打吃',
+  missed_capture: '漏掉提子',
+  filled_own_eye: '填自己的眼',
+  early_first_line: '过早下在一线',
+  inefficient: '效率偏低',
+};
 const GRADE_NOTES = {
-  A: '整体质量很高',
+  A: '平均损失低，整体质量高',
   B: '整体稳健，个别手可改进',
   C: '有明显可提升空间',
   D: '失误较多，建议重点复盘',
@@ -91,6 +98,7 @@ function normalizeMistake(mistake) {
     loss: toNumber(mistake.loss),
     severity,
     reason: mistake.reason || '',
+    reasonLabel: mistake.reasonLabel || REASON_LABELS[mistake.reason] || mistake.reason || '',
   };
 }
 
@@ -183,7 +191,9 @@ function MistakeItem({ mistake }) {
       {mistake.loss !== null ? (
         <span className="mistake__loss">损失 {formatLoss(mistake.loss)}</span>
       ) : null}
-      {mistake.reason ? <span className="mistake__reason">{mistake.reason}</span> : null}
+      {mistake.reasonLabel ? (
+        <span className="mistake__reason">{mistake.reasonLabel}</span>
+      ) : null}
     </li>
   );
 }
@@ -255,7 +265,7 @@ export default function AnalysisPanel({
                   {view.grade || '—'}
                 </span>
                 <div className="report__hero-text">
-                  <span className="report__hero-label">综合评级</span>
+                  <span className="report__hero-label">综合评级（按损失）</span>
                   <span className="report__hero-note">
                     {view.grade ? GRADE_NOTES[view.grade] : '暂无评级'}
                   </span>
@@ -278,6 +288,10 @@ export default function AnalysisPanel({
                   </span>
                 </div>
               </div>
+
+              <p className="hint">
+                评级按平均损失与严重失误数计算；首选一致率只表示是否猜中 AI 第一选点。
+              </p>
 
               {view.phases.length > 0 ? (
                 <div className="report__section">

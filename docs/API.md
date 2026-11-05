@@ -70,7 +70,7 @@
 ### `GET /api/health`
 
 ```json
-{ "ok": true, "version": "2.4.0", "db": true, "uptime": 12.3 }
+{ "ok": true, "version": "2.4.1", "db": true, "uptime": 12.3 }
 ```
 
 `db=false` 表示数据库不可用，但内存对局仍可正常游玩（持久化降级）；
@@ -123,10 +123,12 @@
 
 ### `GET /api/games/:id`
 
-`200 { "ok": true, "id": "…", "state": { … } }`
+`200 { "ok": true, "id": "…", "state": { … }, "analysis": { … } | null }`
 `404 { "ok": false, "reason": "not_found" }`
 
 内存中不存在时尝试从数据库回放 `moveHistory` 重建；都失败返回 404。
+`analysis` 为已保存的复盘报告（手动或自动复盘写入），未复盘时为 `null`；
+前端据此直接恢复报告，避免每次打开终局对局都重复分析。
 
 ### `POST /api/games/:id/move`
 
@@ -204,7 +206,7 @@
     ],
     "mistakes": [
       { "moveIndex": 12, "played": { "x": 2, "y": 2 }, "recommended": { "x": 6, "y": 6 },
-        "loss": 95, "severity": "blunder", "reason": "自陷打吃" }
+        "loss": 95, "severity": "blunder", "reason": "self_atari", "reasonLabel": "自陷打吃" }
     ],
     "summary": "共 68 手（可分析 66 手），AI 首选一致率 70%，平均损失 12.3，评级 B。主要短板：自陷打吃 3 次、漏提子 2 次。"
   }
@@ -215,7 +217,9 @@
   它是“与 AI 第一选点完全相同”的比例，仅作诊断，**不是**评级依据。
 - `loss` 为启发式评分差（非胜率），仅用于横向比较；`averageLoss` 为全部比较手的平均损失。
 - 失误分级：`loss >= 80` → `blunder`，`>= 40` → `mistake`，`>= 15` → `inaccuracy`；
-  `mistakes` 只保留这三类，最多 10 条、按手数倒序（最近的在最前），`recommended=null` 表示 AI 建议 pass。
+  `mistakes` 只保留这三类，最多 10 条、按手数倒序（最近的在最前）。
+  `reason` 是稳定的英文枚举（`self_atari` 等），`reasonLabel` 是配套中文标签，UI 优先展示后者。
+  `recommended` 当前始终是本地评估器的第一选点（合法落子）；若未来评估器支持 pass，才可能为 `null`。
 - `weaknesses` 按失误原因聚合并按次数降序，`severity` 取 `high`/`medium`/`low`。
 - 阶段划分（按手数索引）：布局 `<16`，中盘 `16-49`，收官 `>=50`。
 - 等级：主要看平均损失与严重失误数——A（平均损失<6 且无 blunder、mistake≤1）、

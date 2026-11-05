@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "go9-agent 后端：Express 5 + Prisma 7 + SQLite + 可插拔 AI provider",
   "main": "src/index.js",
   "scripts": {

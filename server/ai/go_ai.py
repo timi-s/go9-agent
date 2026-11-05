@@ -31,9 +31,27 @@
 
 import json
 import math
+import os
 import random
 import sys
 import time
+
+# 可选加载“从 KataGo 自对弈/实战棋谱学习”的棋形与开局知识。
+# 单文件比赛 bot 会把 learned_data.py 拼接到本文件之前，此时下面的 import 失败，
+# 但相关表已经存在于 globals()，_learned_table() 仍能正常取到。
+# Web 路径（Node 直接调用 go_ai.py）通过这个 import 获得同样的知识。
+try:
+    from learned_data import (  # noqa: F401
+        KATAGO_BOOK_BLACK,
+        KATAGO_BOOK_WHITE,
+        PATTERN_TABLES,
+        SHAPE_TABLES,
+        SHAPE_MEANS,
+        SCRIPTS_BLACK,
+        SCRIPTS_WHITE,
+    )
+except Exception:  # pragma: no cover - 缺少 learned_data.py 时退化为纯 MCTS
+    pass
 
 SIZE = 9
 EMPTY = 0
@@ -774,6 +792,21 @@ def katago_book_move(board):
     return None
 
 
+def scripted_move(board):
+    """打榜胜局逐手复刻：局面与赢棋方的局面完全一致时，直接走当时的下一手。"""
+    table = None
+    if board.to_move == BLACK:
+        table = _learned_table("SCRIPTS_BLACK")
+    else:
+        table = _learned_table("SCRIPTS_WHITE")
+    if not table:
+        return None
+    move = table.get(tuple(board.cells))
+    if move is None:
+        return None
+    return move
+
+
 def critical_save_move(board, children):
     """防守硬规则：己方有 5 子以上的棋块只剩 1 气时，优先走能救活它的点。
     避免大龙被一手提掉（白棋被吃崩的主要形态）。"""
@@ -832,6 +865,8 @@ def critical_save_move(board, children):
 
 def choose_move(state, difficulty="medium", seed=None, root_stats=False, max_ms_override=None):
     size = int(state.get("size") or SIZE)
+    if size != SIZE:
+        raise ValueError(f"只支持 {SIZE} 路棋盘，收到 size={size}")
     komi = float(state.get("komi") if state.get("komi") is not None else KOMI)
     board = Board(size)
     cells = board.cells
@@ -854,6 +889,14 @@ def choose_move(state, difficulty="medium", seed=None, root_stats=False, max_ms_
     legal = board.legal_moves()
     if not legal:
         return {"move": None, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "no_legal_move"}}
+
+    script_move = scripted_move(board)
+    if script_move is not None:
+        if script_move == "PASS":
+            return {"move": None, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "script_pass"}}
+        sx, sy = int(script_move[0]), int(script_move[1])
+        if 0 <= sx < size and 0 <= sy < size and board.is_legal(sy * size + sx, board.to_move):
+            return {"move": {"x": sx, "y": sy}, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "script"}}
 
     if should_pass(board, legal, komi):
         return {"move": None, "stats": {"playouts": 0, "elapsedMs": 0, "reason": "endgame_pass"}}

@@ -324,6 +324,7 @@ function analyzeGame(options = {}) {
     const severity = severityOfLoss(loss);
     if (severity) {
       const reason = detectReason({ game: replay, move, best, loss, moveIndex: i });
+      const reasonMeta = WEAKNESS_META[reason] || WEAKNESS_META.inefficient;
       allMistakes.push({
         moveIndex: i,
         played: { x: move.x, y: move.y },
@@ -331,6 +332,7 @@ function analyzeGame(options = {}) {
         loss: round2(loss),
         severity,
         reason,
+        reasonLabel: reasonMeta.label,
       });
       gradedMistakes.push({ reason, loss });
     }

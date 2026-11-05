@@ -86,6 +86,15 @@ test('内置 provider：优先使用 Python，失败时回退 JS', { skip: !pyth
   assertLegalMove(new Go9Game(), fallbackMove, '内置 provider（JS 回退）');
 });
 
+test('PythonGoAgent：读取 LOCAL_AI_SEED 作为默认随机种子', () => {
+  const fromEnv = new PythonGoAgent({ env: { ...process.env, LOCAL_AI_SEED: '987' } });
+  assert.equal(fromEnv.seed, 987);
+  const explicitWins = new PythonGoAgent({ env: { ...process.env, LOCAL_AI_SEED: '987' }, seed: 42 });
+  assert.equal(explicitWins.seed, 42);
+  const invalid = new PythonGoAgent({ env: { ...process.env, LOCAL_AI_SEED: 'not-a-number' } });
+  assert.equal(invalid.seed, undefined);
+});
+
 test('PythonGoAgent：脚本缺失时不可用', () => {
   assert.equal(isAvailable({ ...process.env, LOCAL_AI_SCRIPT: 'C:/definitely/not/exists/go_ai.py' }), false);
 });

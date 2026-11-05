@@ -1,6 +1,6 @@
 {
   "name": "go9-agent",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "private": true,
   "description": "九路围棋 Web 应用：React + Vite 前端，Express + Prisma 后端，可插拔 AI（内置/HTTP/KataGo）与赛后复盘分析",
   "type": "module",
