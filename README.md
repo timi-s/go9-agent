@@ -341,11 +341,24 @@ v1.3 对 Python MCTS 做了算法与性能优化：
 **Q: 前端构建在受限环境报 `spawn EPERM`？**
 这是沙箱禁止子进程管道导致的（Vite 在 Windows 上会执行 `net use`），普通终端不受影响。
 
+## 打榜 / 比赛提交
+
+单文件 Python Bot 可提交到协会 AI 竞赛平台（九路围棋赛道，`arena.v1`）：
+
+```bash
+cd server
+npm run ai:bot                         # 生成 server/ai/dist/go9_bot.py
+python ai/dist/go9_bot.py --selftest   # GTP / JSON / arena 协议自检
+```
+
+平台地址、Docker 本地对战官方基线、提交与评测流程见 [docs/ARENA.md](docs/ARENA.md)。
+
 ## 文档与迭代
 
 - [API 契约](docs/API.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [Agent 接入](docs/AGENT-INTEGRATION.md)
+- [打榜与比赛提交](docs/ARENA.md)
 - [迭代记录与版本意识](docs/ITERATION.md)
 - [更新日志](CHANGELOG.md)
 
